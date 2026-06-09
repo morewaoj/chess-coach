@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RS Chess Coach</title>
+<link rel="stylesheet"
+  href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Playfair+Display:wght@600&display=swap');
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: #0a0a0a;
+  color: #e0e0e0;
+  font-family: 'Inter', sans-serif;
+  min-height: 100vh;
+}
+
+header {
+  border-bottom: 1px solid #1e1e1e;
+  padding: 1rem 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #0a0a0a;
+}
+
+header h1 {
+  font-family: 'Playfair Display', serif;
+  font-size: 1.6rem;
+  color: #C9A84C;
+  letter-spacing: 0.02em;
+}
+
+header span {
+  font-size: 0.72rem;
+  color: #444;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 480px 1fr;
+  gap: 2rem;
+  padding: 1.5rem 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.board-panel {}
+
+.player-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.2rem;
+  font-size: 0.8rem;
+  color: #666;
+}
+
+.player-bar .name { font-weight: 500; color: #999; }
+
+#board-wrap {
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow:
+    0 0 0 2px #2a2200,
+    0 0 0 4px #1a1400,
+    0 8px 40px rgba(0,0,0,0.8),
+    0 2px 8px rgba(201,168,76,0.08);
+  position: relative;
+}
+
+/* Legal move dots */
+.hint-dot {
+  position: absolute;
+  width: 28%;
+  height: 28%;
+  background: rgba(201,168,76,0.55);
+  border-radius: 50%;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* Best move label */
+.best-label {
+  position: absolute;
+  bottom: 3px;
+  right: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  color: #0a0a0a;
+  background: #C9A84C;
+  border-radius: 3px;
+  padding: 1px 4px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  pointer-events: none;
+  z-index: 20;
+  font-family: 'Inter', sans-serif;
+}
+
+/* Square highlights */
+.highlight-selected {
+  box-shadow: inset 0 0 0 4px rgba(201,168,76,0.9) !important;
+}
+.highlight-last {
+  background: rgba(201,168,76,0.22) !important;
+}
+.highlight-best {
+  background: rgba(201,168,76,0.18) !important;
+  box-shadow: inset 0 0 0 3px rgba(201,168,76,0.7) !important;
+}
+.highlight-check {
+  background: rgba(200,40,40,0.35) !important;
+}
+
+.game-info {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.8rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.badge {
+  font-size: 0.68rem;
+  padding: 0.22rem 0.6rem;
+  border-radius: 20px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+.badge-turn  { background:#0f0e09; border:1px solid #2a2200; color:#C9A84C; }
+.badge-eval  { background:#0d0d0d; border:1px solid #1e1e1e; color:#888; }
+.badge-check { background:#2a0000; border:1px solid #5a0000; color:#ff6b6b; }
+
+.controls {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.8rem;
+}
+
+.move-input {
+  flex: 1;
+  background: #111;
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  color: #e0e0e0;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.9rem;
+  padding: 0.6rem 0.9rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.move-input:focus { border-color: #C9A84C; }
+.move-input::placeholder { color: #3a3a3a; }
+
+.btn {
+  background: linear-gradient(135deg, #C9A84C 0%, #a8862e 100%);
+  border: none;
+  border-radius: 6px;
+  color: #0a0a0a;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  padding: 0.6rem 1rem;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  white-space: nowrap;
+}
+
+.btn:hover { opacity: 0.88; }
+.btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.btn-ghost {
+  background: transparent;
+  border: 1px solid #252525;
+  border-radius: 6px;
+  color: #555;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.78rem;
+  padding: 0.6rem 0.9rem;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+  white-space: nowrap;
+}
+
+.btn-ghost:hover { border-color: #C9A84C; color: #C9A84C; }
+
+.error-toast {
+  background: #150000;
+  border: 1px solid #5a0000;
+  border-radius: 6px;
+  color: #ff6b6b;
+  font-size: 0.8rem;
+  padding: 0.5rem 0.8rem;
+  margin-top: 0.5rem;
+  display: none;
+}
+
+.move-history {
+  margin-top: 0.8rem;
+  background: #0d0d0d;
+  border: 1px solid #181818;
+  border-radius: 6px;
+  padding: 0.7rem 0.9rem;
+  font-size: 0.78rem;
+  color: #555;
+  min-height: 44px;
+  line-height: 1.7;
+}
+
+.action-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+/* Coach panel */
+.coach-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.coach-box {
+  background: #0d0d0d;
+  border: 1px solid #1a1a1a;
+  border-radius: 8px;
+  overflow: hidden;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.coach-header {
+  padding: 0.65rem 1rem;
+  border-bottom: 1px solid #161616;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.coach-header-label {
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #C9A84C;
+  font-weight: 500;
+}
+
+.loading-dots {
+  display: none;
+  gap: 3px;
+  align-items: center;
+}
+
+.loading-dots span {
+  width: 4px;
+  height: 4px;
+  background: #C9A84C;
+  border-radius: 50%;
+  animation: blink 1.2s infinite;
+}
+
+.loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+.loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes blink {
+  0%,100% { opacity:0.15; }
+  50%      { opacity:1; }
+}
+
+.coach-response {
+  padding: 1rem;
+  font-size: 0.86rem;
+  line-height: 1.8;
+  color: #bbb;
+  white-space: pre-wrap;
+  flex: 1;
+  overflow-y: auto;
+  min-height: 220px;
+  max-height: 420px;
+}
+
+.coach-response::-webkit-scrollbar { width: 3px; }
+.coach-response::-webkit-scrollbar-thumb {
+  background: #222;
+  border-radius: 2px;
+}
+
+.sources-row {
+  padding: 0.5rem 1rem;
+  border-top: 1px solid #161616;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.source-tag {
+  background: #0f0e09;
+  border: 1px solid #2a2200;
+  border-radius: 3px;
+  color: #9a7a30;
+  padding: 0.1rem 0.45rem;
+  font-size: 0.65rem;
+}
+
+.question-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.question-input {
+  flex: 1;
+  background: #111;
+  border: 1px solid #252525;
+  border-radius: 6px;
+  color: #e0e0e0;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.86rem;
+  padding: 0.65rem 0.9rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.question-input:focus { border-color: #C9A84C; }
+.question-input::placeholder { color: #333; }
+
+.status-bar {
+  text-align: center;
+  font-size: 0.65rem;
+  color: #252525;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+@media (max-width: 920px) {
+  .layout { grid-template-columns: 1fr; padding: 1rem; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>RS Chess Coach</h1>
+  <span>Stockfish 18 · RAG Knowledge · Advanced Analysis</span>
+</header>
+
+<div class="layout">
+
+  <div class="board-panel">
+    <div class="player-bar">
+      <span class="name">⬛ Black</span>
+    </div>
+
+    <div id="board-wrap">
+      <div id="board" style="width:440px"></div>
+    </div>
+
+    <div class="player-bar">
+      <span class="name">⬜ White</span>
+    </div>
+
+    <div class="game-info">
+      <span class="badge badge-turn" id="turn-badge">White to move</span>
+      <span class="badge badge-eval" id="eval-badge">+0.00</span>
+      <span class="badge badge-check" id="check-badge"
+            style="display:none">Check</span>
+    </div>
+
+    <div class="controls">
+      <input class="move-input" id="move-input"
+             placeholder="Type move: e4, Nf3, O-O..."
+             autocomplete="off" spellcheck="false"/>
+      <button class="btn" id="move-btn" onclick="submitMove()">
+        Move
+      </button>
+      <button class="btn-ghost" onclick="getHint()">Hint</button>
+    </div>
+
+    <div class="error-toast" id="error-toast"></div>
+
+    <div class="move-history" id="move-history">
+      No moves yet — make your first move to begin.
+    </div>
+
+    <div class="action-row">
+      <button class="btn-ghost" style="flex:1"
+              onclick="flipBoard()">Flip Board</button>
+      <button class="btn-ghost" style="flex:1"
+              onclick="resetGame()">New Game</button>
+    </div>
+  </div>
+
+  <div class="coach-panel">
+    <div class="coach-box">
+      <div class="coach-header">
+        <span class="coach-header-label">Coach Analysis</span>
+        <div class="loading-dots" id="loading-dots">
+          <span></span><span></span><span></span>
+        </div>
+      </div>
+
+      <div class="coach-response" id="coach-response">
+Welcome to RS Chess Coach.
+
+Drag a piece to move it — or type your move below.
+Legal move squares light up when you select a piece.
+The engine's recommended square is marked BEST.
+
+The coach combines:
+  · Stockfish 18 — world-class engine analysis
+  · RAG knowledge base — openings, tactics, strategy, endgames
+  · Full game memory — advice builds on every move played
+
+Make your first move to receive full analysis.
+      </div>
+
+      <div class="sources-row" id="sources-row">
+        <span style="color:#2a2a2a;font-size:0.68rem">
+          Sources shown after analysis
+        </span>
+      </div>
+    </div>
+
+    <div class="question-row">
+      <input class="question-input" id="question-input"
+             placeholder="Ask the coach about your position..."
+             autocomplete="off"/>
+      <button class="btn" onclick="askQuestion()">Ask</button>
+    </div>
+
+    <div class="status-bar">
+      RS Chess Coach · Stockfish 18 · RAG Knowledge Base
+    </div>
+  </div>
+</div>
+
+<script>
+const API_BASE = "http://localhost:8000";
+
+let game  = new Chess();
+let board = null;
+let selectedSq   = null;
+let lastMoveSqs  = [];
+let bestMoveSq   = null;
+let pendingMove  = null;
+
+// ── Init ──────────────────────────────────────────────────
+function initBoard() {
+  board = Chessboard("board", {
+    draggable:  true,
+    position:   "start",
+    pieceTheme: "https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png",
+    onDragStart,
+    onDrop,
+    onSnapEnd,
+    onMouseoverSquare,
+    onMouseoutSquare,
+  });
+
+  // Pre-fetch best move for starting position
+  fetchBestMoveHighlight();
+}
+
+// ── Drag & drop ───────────────────────────────────────────
+function onDragStart(source, piece) {
+  if (game.game_over()) return false;
+  if (game.turn() === "w" && piece.startsWith("b")) return false;
+  if (game.turn() === "b" && piece.startsWith("w")) return false;
+  clearOverlays();
+  showLegalDots(source);
+}
+
+function onDrop(source, target) {
+  clearOverlays();
+
+  // Test move locally first
+  const testMove = game.move({
+    from: source, to: target, promotion: "q"
+  });
+
+  if (testMove === null) return "snapback";
+
+  // Move is legal — undo local and let backend confirm
+  game.undo();
+
+  // Show piece instantly (optimistic update)
+  const tempGame = new Chess(game.fen());
+  tempGame.move({ from: source, to: target, promotion: "q" });
+  board.position(tempGame.fen(), false);
+
+  pendingMove = source + target;
+  sendMoveToBackend(source + target);
+}
+
+function onSnapEnd() {
+  // Keep board in sync with local game state
+  // (backend response will set final position)
+}
+
+// ── Hover: show legal dots ────────────────────────────────
+function onMouseoverSquare(square) {
+  if (selectedSq) return;
+  const moves = game.moves({ square, verbose: true });
+  if (!moves.length) return;
+  showLegalDots(square);
+}
+
+function onMouseoutSquare() {
+  if (!selectedSq) clearDots();
+}
+
+// ── Overlays ──────────────────────────────────────────────
+function showLegalDots(square) {
+  const moves = game.moves({ square, verbose: true });
+  moves.forEach(m => {
+    const $sq = $(`#board .square-${m.to}`);
+    if (!$sq.length) return;
+
+    // Check if this is the best move target
+    const isBest = bestMoveSq && m.to === bestMoveSq;
+
+    const dot = $("<div>").addClass("hint-dot");
+    $sq.css("position", "relative").append(dot);
+
+    if (isBest) {
+      const label = $("<div>")
+        .addClass("best-label")
+        .text("BEST");
+      $sq.append(label);
+      $sq.addClass("highlight-best");
+    }
+  });
+}
+
+function clearDots() {
+  $(".hint-dot").remove();
+  $(".best-label").remove();
+  $("#board .square-55d63").removeClass("highlight-best");
+}
+
+function clearOverlays() {
+  clearDots();
+  $(".hint-dot").remove();
+  $(".best-label").remove();
+  $("#board .square-55d63").removeClass(
+    "highlight-selected highlight-last highlight-best highlight-check"
+  );
+}
+
+function showLastMove(from, to) {
+  lastMoveSqs = [from, to];
+  $(`#board .square-${from}`).addClass("highlight-last");
+  $(`#board .square-${to}`).addClass("highlight-last");
+}
+
+// ── Send move to backend ──────────────────────────────────
+async function sendMoveToBackend(moveStr) {
+  setLoading(true);
+  hideError();
+
+  try {
+    const res = await fetch(`${API_BASE}/game/move`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({
+        move:    moveStr,
+        message: "Analyze this position deeply. What is the best move and why?"
+      })
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      // Revert board on error
+      board.position(game.fen(), false);
+      showError(err.detail || "Invalid move.");
+      setLoading(false);
+      return;
+    }
+
+    const data = await res.json();
+
+    // Sync game state with backend
+    game.load(data.fen);
+    board.position(data.fen, false);
+
+    // Highlights
+    clearOverlays();
+    const from = moveStr.slice(0, 2);
+    const to   = moveStr.slice(2, 4);
+    showLastMove(from, to);
+
+    // Check highlight
+    if (data.is_check && !data.is_checkmate) {
+      const kingSq = findKingSquare(game);
+      if (kingSq) $(`#board .square-${kingSq}`).addClass("highlight-check");
+    }
+
+    updateBadges(data);
+    updateHistory();
+    displayCoaching(data.coaching);
+
+    // Pre-fetch best move for next position
+    await fetchBestMoveHighlight();
+
+  } catch (e) {
+    board.position(game.fen(), false);
+    showError("Cannot reach backend. Is api.py running?");
+  }
+
+  setLoading(false);
+}
+
+// ── Pre-fetch best move from engine ──────────────────────
+async function fetchBestMoveHighlight() {
+  bestMoveSq = null;
+  try {
+    const res  = await fetch(`${API_BASE}/game/hint`);
+    const data = await res.json();
+    if (data.best_move) {
+      // Convert SAN to target square
+      const tempGame = new Chess(game.fen());
+      const m = tempGame.move(data.best_move);
+      if (m) bestMoveSq = m.to;
+    }
+  } catch (e) {}
+}
+
+// ── Submit move from text input ───────────────────────────
+async function submitMove() {
+  const val = document.getElementById("move-input").value.trim();
+  if (!val) return;
+
+  // Try to convert SAN to UCI for consistency
+  const testMove = game.move(val);
+  if (testMove) {
+    const uci = testMove.from + testMove.to +
+                (testMove.promotion || "");
+    game.undo();
+    document.getElementById("move-input").value = "";
+    await sendMoveToBackend(uci);
+  } else {
+    await sendMoveToBackend(val);
+    document.getElementById("move-input").value = "";
+  }
+}
+
+// ── Ask question ──────────────────────────────────────────
+async function askQuestion() {
+  const input = document.getElementById("question-input");
+  const q = input.value.trim();
+  if (!q) return;
+
+  setLoading(true);
+  hideError();
+
+  try {
+    const res = await fetch(`${API_BASE}/game/ask`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ message: q })
+    });
+    const data = await res.json();
+    input.value = "";
+    displayCoaching(data.coaching);
+  } catch (e) {
+    showError("Cannot reach backend.");
+  }
+
+  setLoading(false);
+}
+
+// ── Hint ──────────────────────────────────────────────────
+async function getHint() {
+  setLoading(true);
+  hideError();
+  try {
+    const res  = await fetch(`${API_BASE}/game/hint`);
+    const data = await res.json();
+    displayCoaching(data);
+  } catch (e) {
+    showError("Cannot reach backend.");
+  }
+  setLoading(false);
+}
+
+// ── Reset ─────────────────────────────────────────────────
+async function resetGame() {
+  try {
+    await fetch(`${API_BASE}/game/reset`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ confirm: true })
+    });
+  } catch(e) {}
+
+  game = new Chess();
+  board.start(false);
+  clearOverlays();
+  bestMoveSq = null;
+
+  document.getElementById("move-history").textContent =
+    "No moves yet — make your first move to begin.";
+  document.getElementById("coach-response").textContent =
+    "Game reset. Make your first move to begin.";
+  document.getElementById("sources-row").innerHTML =
+    '<span style="color:#2a2a2a;font-size:0.68rem">Sources shown after analysis</span>';
+  document.getElementById("eval-badge").textContent   = "+0.00";
+  document.getElementById("turn-badge").textContent   = "White to move";
+  document.getElementById("check-badge").style.display = "none";
+
+  await fetchBestMoveHighlight();
+}
+
+function flipBoard() { board.flip(); }
+
+// ── Helpers ───────────────────────────────────────────────
+function findKingSquare(g) {
+  const board = g.board();
+  const color = g.turn();
+  for (let r = 0; r < 8; r++) {
+    for (let f = 0; f < 8; f++) {
+      const p = board[r][f];
+      if (p && p.type === "k" && p.color === color) {
+        return String.fromCharCode(97 + f) + (8 - r);
+      }
+    }
+  }
+  return null;
+}
+
+function updateBadges(data) {
+  document.getElementById("turn-badge").textContent =
+    game.turn() === "w" ? "White to move" : "Black to move";
+
+  const c = data.coaching;
+  if (c) {
+    if (c.mate_in != null) {
+      document.getElementById("eval-badge").textContent =
+        `Mate in ${Math.abs(c.mate_in)}`;
+    } else if (c.evaluation != null) {
+      const sign = c.evaluation >= 0 ? "+" : "";
+      document.getElementById("eval-badge").textContent =
+        `${sign}${c.evaluation.toFixed(2)}`;
+    }
+  }
+
+  const cb = document.getElementById("check-badge");
+  if (data.is_checkmate) {
+    cb.textContent = "Checkmate";
+    cb.style.display = "inline";
+  } else if (data.is_check) {
+    cb.textContent = "Check";
+    cb.style.display = "inline";
+  } else {
+    cb.style.display = "none";
+  }
+}
+
+function updateHistory() {
+  const h = game.history();
+  if (!h.length) return;
+  let str = "";
+  for (let i = 0; i < h.length; i += 2) {
+    str += `${Math.floor(i/2)+1}. ${h[i]} ${h[i+1]||""} `;
+  }
+  document.getElementById("move-history").textContent = str.trim();
+}
+
+function displayCoaching(c) {
+  if (!c) return;
+  document.getElementById("coach-response").textContent =
+    c.response || "";
+
+  const sr = document.getElementById("sources-row");
+  if (c.sources && c.sources.length) {
+    sr.innerHTML = c.sources
+      .map(s => `<span class="source-tag">${s}</span>`)
+      .join(" ");
+  } else {
+    sr.innerHTML =
+      '<span style="color:#2a2a2a;font-size:0.68rem">No sources</span>';
+  }
+}
+
+function setLoading(on) {
+  document.getElementById("loading-dots").style.display =
+    on ? "flex" : "none";
+  document.getElementById("move-btn").disabled = on;
+}
+
+function showError(msg) {
+  const t = document.getElementById("error-toast");
+  t.textContent = msg;
+  t.style.display = "block";
+  setTimeout(() => { t.style.display = "none"; }, 4000);
+}
+
+function hideError() {
+  document.getElementById("error-toast").style.display = "none";
+}
+
+// ── Keyboard ──────────────────────────────────────────────
+document.addEventListener("DOMContentLoaded", () => {
+  initBoard();
+  document.getElementById("move-input")
+    .addEventListener("keydown", e => {
+      if (e.key === "Enter") submitMove();
+    });
+  document.getElementById("question-input")
+    .addEventListener("keydown", e => {
+      if (e.key === "Enter") askQuestion();
+    });
+});
+</script>
+</body>
+</html>
