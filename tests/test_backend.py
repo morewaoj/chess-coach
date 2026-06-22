@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 import api
 from board import ChessGame
+from retrieve import retrieve
 
 
 def fake_coaching_response():
@@ -143,6 +144,13 @@ class ChessGameTests(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertIn("Illegal move for current position", result["error"])
         self.assertIn("Black's turn", result["error"])
+
+
+class RetrievalTests(unittest.TestCase):
+    def test_retrieval_finds_sicilian_document(self):
+        chunks = retrieve("I played e4 and opponent played c5", k=3)
+        sources = [chunk["source"] for chunk in chunks]
+        self.assertIn("openings_sicilian.txt", sources)
 
 
 if __name__ == "__main__":

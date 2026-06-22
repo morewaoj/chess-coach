@@ -617,6 +617,9 @@ http://localhost:8000
 - Do not deploy the backend to Vercel for the portfolio version.
   The backend uses Stockfish, ChromaDB, and in-memory game state,
   which fit better on a persistent Docker web service.
+- The Docker deployment uses `requirements-prod.txt` and a
+  lightweight text retriever to avoid loading ChromaDB/ONNX
+  embedding models on small-memory hosts.
 - Setting the Vercel root directory to `frontend` prevents Vercel
   from detecting the FastAPI backend files.
 - The included `.vercelignore` keeps backend files out of the
