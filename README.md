@@ -23,30 +23,88 @@ coaching system. For every position it:
 ## Architecture
 
 ```
-HTML Frontend (Vercel)
-        ↓ fetch() API calls
-FastAPI Backend (Render)
-        ↓
-┌───────────────────────────────────┐
-│             coach.py              │
-│                                   │
-│  ┌──────────┐  ┌───────────────┐  │
-│  │Stockfish │  │ RAG Pipeline  │  │
-│  │    18    │  │               │  │
-│  │best move │  │   ChromaDB    │  │
-│  │eval score│  │   64 chunks   │  │
-│  └──────────┘  │  8 documents  │  │
-│                └───────────────┘  │
-│  ┌──────────────────────────────┐ │
-│  │   Game Memory (board.py)     │ │
-│  │  full move history + FEN     │ │
-│  └──────────────────────────────┘ │
-│  ┌──────────────────────────────┐ │
-│  │    Groq llama-3.3-70b        │ │
-│  │    grounded explanation      │ │
-│  └──────────────────────────────┘ │
-└───────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                        Frontend                             │
+│                                                             │
+│  index.html                                                 │
+│  - Interactive chess board                                  │
+│  - Move input, hint requests, coaching chat                 │
+│  - Calls FastAPI with fetch()                               │
+└───────────────────────────┬─────────────────────────────────┘
+                            │ HTTP / JSON
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      FastAPI Backend                         │
+│                                                             │
+│  api.py                                                     │
+│  - /game/state, /game/move, /game/ask, /game/hint, /reset   │
+│  - Request validation with Pydantic                         │
+│  - CORS for browser frontend                                │
+│  - Lazy Stockfish startup and clean shutdown                │
+└───────────────┬──────────────────────┬──────────────────────┘
+                │                      │
+                ▼                      ▼
+┌───────────────────────────┐   ┌─────────────────────────────┐
+│      Game State Layer      │   │      Chess Engine Layer     │
+│                            │   │                             │
+│  src/board.py              │   │  src/engine.py              │
+│  - python-chess Board      │   │  - Stockfish 18 UCI process │
+│  - Legal move validation   │   │  - Best move                │
+│  - SAN/UCI/plain parsing   │   │  - Evaluation score         │
+│  - Move history            │   │  - Top candidate moves      │
+│  - FEN position state      │   │  - Move quality analysis    │
+└───────────────┬───────────┘   └──────────────┬──────────────┘
+                │                              │
+                └──────────────┬───────────────┘
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    AI Coaching Layer                         │
+│                                                             │
+│  src/coach.py                                               │
+│  - Builds full coaching prompt                              │
+│  - Combines board state + Stockfish + retrieved knowledge   │
+│  - Sends grounded prompt to Groq LLM                        │
+│  - Returns structured coaching response                     │
+└───────────────────────────┬─────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                        RAG Layer                             │
+│                                                             │
+│  documents/raw/*.txt                                        │
+│       ↓ ingest.py                                           │
+│       ↓ chunk.py                                            │
+│       ↓ embed.py                                            │
+│  data/chroma_store                                          │
+│       ↓ retrieve.py                                         │
+│  Top-k chess knowledge chunks                               │
+└─────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Runtime Flow
+
+When a player makes a move or asks for help, the system
+follows a deterministic pipeline before involving the LLM:
+
+1. The frontend sends a JSON request to FastAPI.
+2. `api.py` validates the request and calls the game layer.
+3. `board.py` checks legality, updates the board, and stores
+   the move history in standard algebraic notation.
+4. `engine.py` asks Stockfish for the best move and evaluation.
+5. `coach.py` builds a retrieval query using the user message,
+   recent moves, current turn, and game state.
+6. `retrieve.py` embeds the query and searches ChromaDB for the
+   most relevant chess knowledge chunks.
+7. `coach.py` builds a grounded prompt containing the FEN,
+   move history, Stockfish output, and retrieved knowledge.
+8. Groq's LLM generates a human coaching explanation.
+9. FastAPI returns the best move, evaluation, citations, and
+   coaching response to the frontend.
+
+This keeps calculation, retrieval, and explanation separate.
+That separation is the central engineering decision in the app.
 
 ---
 
@@ -73,6 +131,90 @@ move in standard algebraic notation and maintains the
 full FEN position string. Every coaching response 
 includes the complete game history so the LLM 
 understands the full narrative of the game.
+
+---
+
+## AI Engineering Relevance
+
+This project demonstrates a production-style AI pattern:
+
+```
+Deterministic tool + state management + retrieval + LLM generation + API + UI
+```
+
+The app does not treat the LLM as an all-knowing black box.
+Instead, it gives each subsystem the job it is best suited for:
+
+| Problem | System Used | Why |
+|---------|-------------|-----|
+| Legal move validation | python-chess | Deterministic rules, no hallucination |
+| Best move calculation | Stockfish 18 | Search and evaluation are engine tasks |
+| Domain knowledge | ChromaDB + fastembed | Retrieves relevant chess concepts |
+| Explanation | Groq LLM | Converts analysis into coaching language |
+| State and orchestration | FastAPI backend | Owns API flow and system boundaries |
+| User experience | HTML/CSS/JS frontend | Makes the AI system usable |
+
+That is directly relevant to AI engineering because many useful
+AI products are not just prompts. They are orchestrated systems
+where the LLM is one component among tools, databases, APIs,
+validators, and user-facing workflows.
+
+This same architecture maps to other domains:
+
+| Domain | Deterministic Tool | Retrieval Source | LLM Role |
+|--------|--------------------|------------------|----------|
+| Healthcare | Clinical rules / calculators | Medical guidelines | Explain and summarize |
+| Legal | Citation and statute lookup | Case law corpus | Draft and reason with citations |
+| Finance | Pricing / risk models | Market reports | Explain portfolio decisions |
+| Developer tools | Tests / compilers | Docs and codebase | Debug and propose fixes |
+| Education | Grading logic | Curriculum content | Tutor the student |
+
+The chess coach is a compact example of the same engineering
+pattern used in real AI products: ground the model, constrain
+the model, verify with tools, and expose the result through a
+usable product interface.
+
+---
+
+## AI Engineering Skills Demonstrated
+
+This project is useful as an AI engineering portfolio project
+because it shows the following skills:
+
+| Skill | Where It Shows Up |
+|-------|-------------------|
+| LLM application design | `src/coach.py` prompt construction and response format |
+| RAG pipeline development | `ingest.py`, `chunk.py`, `embed.py`, `retrieve.py` |
+| Vector database usage | ChromaDB persistent store in `data/chroma_store` |
+| Embedding model selection | fastembed with BAAI/bge-small-en-v1.5 |
+| Tool orchestration | Stockfish + RAG + Groq combined in one response |
+| Deterministic validation | python-chess move legality and FEN state |
+| API engineering | FastAPI endpoints, Pydantic request models, CORS |
+| State management | Persistent in-memory game state across API calls |
+| Prompt engineering | Structured coach prompt with citations and constraints |
+| Reliability thinking | LLM does not calculate moves; Stockfish does |
+| Testing and debugging | Backend smoke tests under `tests/test_backend.py` |
+| Deployment awareness | Vercel frontend and Render backend architecture |
+
+Interview positioning:
+
+- Built a multi-component AI system instead of a simple chatbot.
+- Used RAG to ground responses in a domain-specific knowledge base.
+- Integrated an external deterministic engine to prevent LLM
+  hallucination in a high-precision task.
+- Designed API boundaries between frontend, backend, retrieval,
+  engine analysis, and generation.
+- Added tests for backend behavior without depending on live LLM calls.
+- Made model output structured, cited, and product-ready.
+
+Strong resume framing:
+
+> Built an AI chess coaching platform combining Stockfish 18,
+> FastAPI, ChromaDB, fastembed, and Groq LLMs to deliver grounded,
+> cited coaching advice from live game state. Designed a RAG
+> pipeline over chess knowledge documents, orchestrated deterministic
+> engine analysis with LLM explanation, and implemented API endpoints
+> plus backend smoke tests for reliable local operation.
 
 ---
 
@@ -309,6 +451,7 @@ would use Redis or a database for persistent state.
 | POST | /game/move | Make a move and get coaching |
 | POST | /game/ask | Ask a question without moving |
 | GET | /game/hint | Get best move recommendation |
+| GET | /game/best-move | Fast Stockfish-only move for UI highlighting |
 | POST | /game/reset | Reset to starting position |
 
 ---
@@ -345,6 +488,11 @@ chmod +x stockfish
 cp .env.example .env
 # Edit .env and add GROQ_API_KEY
 
+# Optional Groq/token controls
+# GROQ_MAX_TOKENS=650
+# RAG_TOP_K=3
+# RAG_CHUNK_CHARS=450
+
 # Build vector store
 python3 src/embed.py
 
@@ -354,6 +502,118 @@ python3 api.py
 # Open frontend
 open index.html
 ```
+
+---
+
+## Running Tests
+
+Backend smoke tests are included so the API can be checked
+without making live Groq calls:
+
+```bash
+source .venv/bin/activate
+python -m unittest discover -s tests -v
+```
+
+The tests cover:
+
+- FastAPI import behavior
+- Health and game state endpoints
+- Invalid move handling
+- Move endpoint response shape
+- Fast Stockfish-only best move endpoint
+- Engine fallback when the AI provider fails
+- Reset behavior
+- SAN, UCI, and plain-English move parsing
+
+This keeps core backend behavior testable even when the LLM
+provider is unavailable or API keys are not configured.
+
+---
+
+## Deployment
+
+Recommended production setup:
+
+```txt
+Frontend: Vercel
+Backend: Render using Docker
+```
+
+### 1. Deploy Backend To Render
+
+The backend includes:
+
+- `Dockerfile` — installs Python dependencies and Linux Stockfish
+- `render.yaml` — Render web service blueprint
+- `api.py` — FastAPI app served by uvicorn
+
+On Render:
+
+1. Create a new Blueprint or Web Service from this repository.
+2. Use the Docker environment.
+3. Add environment variables:
+
+```bash
+GROQ_API_KEY=your_groq_key
+GROQ_MAX_TOKENS=650
+RAG_TOP_K=3
+RAG_CHUNK_CHARS=450
+```
+
+The Docker image builds the Chroma vector store during deploy:
+
+```bash
+python src/embed.py
+```
+
+After deploy, Render gives you a backend URL like:
+
+```txt
+https://chess-coach-api.onrender.com
+```
+
+### 2. Deploy Frontend To Vercel
+
+The frontend is static and uses:
+
+- `index.html`
+- `package.json`
+- `scripts/write-config.js`
+- `vercel.json`
+
+In Vercel project settings, add:
+
+```bash
+CHESS_COACH_API_BASE=https://your-render-backend-url.onrender.com
+```
+
+During `npm run build`, the script writes `config.js`:
+
+```js
+window.CHESS_COACH_CONFIG = {
+  API_BASE: "https://your-render-backend-url.onrender.com"
+};
+```
+
+Locally, if `config.js` is missing, the frontend falls back to:
+
+```txt
+http://localhost:8000
+```
+
+### Deployment Notes
+
+- Do not deploy the backend to Vercel for the portfolio version.
+  The backend uses Stockfish, ChromaDB, and in-memory game state,
+  which fit better on a persistent Docker web service.
+- The included `.vercelignore` keeps backend files out of the
+  frontend deployment.
+- The included `.dockerignore` keeps local-only files out of the
+  backend image.
+- Current game state is in memory. Restarting the backend resets
+  the game. For multi-user production, add Redis or database-backed
+  sessions.
 
 ---
 

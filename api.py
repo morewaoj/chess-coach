@@ -1,7 +1,6 @@
 import sys
 sys.path.insert(0, "src")
 
-import os
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -30,13 +29,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global game and engine instances
-# These persist for the server lifetime so game state
-# is maintained across multiple API calls.
+# Global game state persists for the server lifetime.
 # In production with multiple users you would use
 # session-based state — for personal use this is fine.
 game = ChessGame()
-engine = ChessEngine()
+_engine = None
+
+
+def get_engine() -> ChessEngine:
+    """Start Stockfish on first use instead of at import time."""
+    global _engine
+    if _engine is None:
+        _engine = ChessEngine()
+    return _engine
+
+
+@app.on_event("shutdown")
+def shutdown_engine():
+    """Cleanly close the Stockfish subprocess when the API stops."""
+    global _engine
+    if _engine is not None:
+        _engine.close()
+        _engine = None
 
 
 class MoveRequest(BaseModel):
@@ -53,6 +67,75 @@ class QuestionRequest(BaseModel):
 class ResetRequest(BaseModel):
     """Request body for resetting the game."""
     confirm: bool = True
+
+
+def get_engine_hint() -> dict:
+    """Return Stockfish analysis without calling RAG or the LLM."""
+    global _engine
+    try:
+        result = get_engine().get_best_move(game.board)
+    except Exception:
+        shutdown_engine()
+        _engine = None
+        result = get_engine().get_best_move(game.board)
+    return {
+        "best_move": result.get("move_san"),
+        "move_uci": result.get("move_uci"),
+        "evaluation": result.get("evaluation"),
+        "mate_in": result.get("mate_in"),
+        "sources": []
+    }
+
+
+def fallback_coaching(error: Exception) -> dict:
+    """
+    Keep the API responsive when the external AI layer fails.
+
+    Groq, network access, or retrieval can fail independently
+    of the chess backend. The frontend should still receive a
+    valid JSON payload with the engine move instead of showing
+    "backend not working."
+    """
+    try:
+        hint = get_engine_hint()
+    except Exception:
+        hint = {
+            "best_move": None,
+            "evaluation": None,
+            "mate_in": None,
+            "sources": []
+        }
+
+    detail = str(error)
+    response = (
+        "The chess backend is running, but the AI coaching layer "
+        "could not complete this request.\n\n"
+        f"Stockfish best move: {hint['best_move'] or 'Unavailable'}\n"
+        f"Evaluation: {hint['evaluation']}\n\n"
+        "Try again in a moment. If this keeps happening, check the "
+        "Groq API key, network connection, or rate limits.\n\n"
+        f"Technical detail: {detail}"
+    )
+
+    return {
+        "response": response,
+        "best_move": hint["best_move"],
+        "evaluation": hint["evaluation"],
+        "mate_in": hint["mate_in"],
+        "sources": hint["sources"],
+        "error": detail
+    }
+
+
+def safe_get_coaching_response(message: str) -> dict:
+    try:
+        return get_coaching_response(
+            game,
+            get_engine(),
+            message
+        )
+    except Exception as exc:
+        return fallback_coaching(exc)
 
 
 @app.get("/")
@@ -107,12 +190,9 @@ def make_move(request: MoveRequest):
             detail=move_result["error"]
         )
 
-    # Get coaching response for the new position
-    coaching = get_coaching_response(
-        game,
-        engine,
-        request.message
-    )
+    # Get coaching response for the new position.
+    # If Groq/RAG fails, return an engine-only fallback payload.
+    coaching = safe_get_coaching_response(request.message)
 
     return {
         "move_applied": move_result["move_san"],
@@ -139,11 +219,7 @@ def ask_question(request: QuestionRequest):
     requesting explanation of a concept, or getting
     advice before deciding on a move.
     """
-    coaching = get_coaching_response(
-        game,
-        engine,
-        request.message
-    )
+    coaching = safe_get_coaching_response(request.message)
 
     return {
         "fen": game.get_context()["fen"],
@@ -178,9 +254,7 @@ def get_hint():
     Get the best move hint without making a move.
     Shows Stockfish recommendation for current position.
     """
-    coaching = get_coaching_response(
-        game,
-        engine,
+    coaching = safe_get_coaching_response(
         "What is the best move in this position and why?"
     )
 
@@ -190,6 +264,17 @@ def get_hint():
         "response": coaching["response"],
         "sources": coaching["sources"]
     }
+
+
+@app.get("/game/best-move")
+def get_best_move():
+    """
+    Fast Stockfish-only endpoint for UI highlighting.
+
+    This avoids spending a full RAG + LLM call every time the
+    frontend wants to pre-highlight the engine recommendation.
+    """
+    return get_engine_hint()
 
 
 if __name__ == "__main__":

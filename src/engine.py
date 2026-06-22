@@ -1,11 +1,28 @@
+import os
+import shutil
 import chess
 import chess.engine
 from pathlib import Path
 
 
-STOCKFISH_PATH = "./stockfish"
+STOCKFISH_PATH = os.getenv("STOCKFISH_PATH", "./stockfish")
 DEFAULT_DEPTH = 15
 FAST_DEPTH = 10
+
+
+def resolve_stockfish_path(path: str) -> str:
+    """Resolve local or system-installed Stockfish path."""
+    if Path(path).exists():
+        return path
+
+    system_path = shutil.which("stockfish")
+    if system_path:
+        return system_path
+
+    raise FileNotFoundError(
+        f"Stockfish not found at: {path}\n"
+        "Set STOCKFISH_PATH or install stockfish on the host."
+    )
 
 
 class ChessEngine:
@@ -34,7 +51,7 @@ class ChessEngine:
     """
 
     def __init__(self, path: str = STOCKFISH_PATH):
-        self.path = path
+        self.path = resolve_stockfish_path(path)
         self.engine = None
         self._start()
 
@@ -46,12 +63,6 @@ class ChessEngine:
         the UCI (Universal Chess Interface) protocol.
         UCI is the standard protocol all chess engines use.
         """
-        if not Path(self.path).exists():
-            raise FileNotFoundError(
-                f"Stockfish not found at: {self.path}\n"
-                f"Download from stockfishchess.org and place "
-                f"in project root."
-            )
         self.engine = chess.engine.SimpleEngine.popen_uci(self.path)
 
     def get_best_move(self,
@@ -203,7 +214,10 @@ class ChessEngine:
     def close(self):
         """Cleanly shut down the Stockfish process."""
         if self.engine:
-            self.engine.quit()
+            try:
+                self.engine.quit()
+            except (chess.engine.EngineTerminatedError, BrokenPipeError):
+                pass
             self.engine = None
 
     def __enter__(self):

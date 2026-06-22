@@ -2,17 +2,17 @@ import os
 import sys
 sys.path.insert(0, "src")
 
-import chess
 from groq import Groq
 from dotenv import load_dotenv
 from board import ChessGame
 from engine import ChessEngine
-from retrieve import retrieve
 
 load_dotenv()
 
 GROQ_MODEL = "llama-3.3-70b-versatile"
-MAX_TOKENS = 1024
+MAX_TOKENS = int(os.getenv("GROQ_MAX_TOKENS", "650"))
+DEFAULT_RETRIEVAL_K = int(os.getenv("RAG_TOP_K", "3"))
+MAX_KNOWLEDGE_CHARS = int(os.getenv("RAG_CHUNK_CHARS", "450"))
 
 
 def build_chess_context(chunks: list[dict]) -> str:
@@ -30,8 +30,11 @@ def build_chess_context(chunks: list[dict]) -> str:
 
     context_parts = []
     for i, chunk in enumerate(chunks):
+        text = chunk["text"].strip()
+        if len(text) > MAX_KNOWLEDGE_CHARS:
+            text = text[:MAX_KNOWLEDGE_CHARS].rstrip() + "..."
         context_parts.append(
-            f"[Knowledge {i+1}: {chunk['source']}]\n{chunk['text']}"
+            f"[Knowledge {i+1}: {chunk['source']}]\n{text}"
         )
     return "\n\n".join(context_parts)
 
@@ -105,36 +108,35 @@ def build_coach_prompt(
     elif game_context.get("is_check"):
         game_over_note = "\n⚠️ CHECK — The king is in check."
 
-    system_message = f"""You are RS Chess Coach — an expert chess coach helping a 1200-1800 rated player improve and win their current game.
+    system_message = f"""You are RS Chess Coach, a concise chess coach for a 1200-1800 rated player.
 
 CURRENT GAME STATE:
 Move history: {history_str}
 Current position (FEN): {game_context.get('fen', 'Starting position')}
 Turn: {game_context.get('turn', 'White')}
-Stockfish best move: {stockfish_result.get('move_san', 'Calculating...')}
+Stockfish 18 best move: {stockfish_result.get('move_san', 'Calculating...')}
 Position evaluation: {eval_str}{game_over_note}
 
-CHESS KNOWLEDGE BASE:
+CHESS KNOWLEDGE BASE (use this as your primary source):
 {knowledge_context}
 
-YOUR COACHING RULES:
-1. ALWAYS lead with the Stockfish best move — this is mathematically correct and non-negotiable.
-2. Explain WHY the best move is best using the knowledge base. Cite sources using [Knowledge N: filename].
-3. Identify the opening or position type from the move history and knowledge base.
-4. Warn about specific traps or tactical patterns relevant to this position.
-5. Give the strategic plan for the next 3-5 moves.
-6. If it is checkmate or game over, congratulate or console and give a brief game recap.
-7. Answer ONLY from the retrieved knowledge base for chess theory. Do not use general AI chess knowledge.
-8. If knowledge base lacks specific information, say so honestly.
+RULES:
+- Lead with the Stockfish best move.
+- Explain the evaluation in plain language.
+- Use citations like [Knowledge 1: file.txt] when using retrieved knowledge.
+- Be specific about squares, plans, and immediate dangers.
+- If the retrieved knowledge is thin, say so briefly and use general chess principles.
+- Keep the total answer under 450 words.
 
-RESPONSE FORMAT — always use exactly this structure:
-♟ BEST MOVE: [the Stockfish move]
-📊 EVALUATION: [the position score and what it means]
-📖 OPENING/POSITION: [what opening or structure this is]
-⚡ WHY THIS MOVE: [explanation grounded in knowledge base with citations]
-🎯 STRATEGIC PLAN: [next 3-5 moves and the plan]
-⚠️ WATCH OUT: [traps, threats, or tactical patterns to be aware of]
-📚 SOURCE: [which documents this advice draws from]"""
+FORMAT:
+BEST MOVE: [move]
+EVALUATION: [score meaning]
+POSITION TYPE: [opening/structure]
+WHY THIS MOVE: [2-4 sentences with citation if useful]
+PLAN: [3 concrete next ideas]
+OPPONENT WANTS: [1-2 sentences]
+WATCH OUT: [specific warning]
+SOURCES: [files]"""
 
     return system_message
 
@@ -143,7 +145,7 @@ def get_coaching_response(
     game: ChessGame,
     engine: ChessEngine,
     user_message: str,
-    k: int = 5
+    k: int | None = None
 ) -> dict:
     """
     Main coaching function — combines all four systems.
@@ -170,6 +172,8 @@ def get_coaching_response(
     understands the full game context.
     """
     game_context = game.get_context()
+    if k is None:
+        k = DEFAULT_RETRIEVAL_K
 
     # Handle game over states
     if game_context["is_checkmate"]:
@@ -213,10 +217,14 @@ def get_coaching_response(
             f"Turn: {game_context['turn']}"
         )
     else:
-        rag_query = f"{user_message}. Starting position. "
-        f"Turn: {game_context['turn']}"
+        rag_query = (
+            f"{user_message}. Starting position. "
+            f"Turn: {game_context['turn']}"
+        )
 
     # Step 3: Retrieve relevant chess knowledge
+    from retrieve import retrieve
+
     chunks = retrieve(rag_query, k=k)
     knowledge_context = build_chess_context(chunks)
 

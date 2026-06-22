@@ -1,0 +1,16 @@
+.venv
+.env
+.git
+__pycache__
+*.pyc
+*.pyo
+.DS_Store
+data
+documents
+src
+tests
+api.py
+app.py
+requirements.txt
+render.yaml
+stockfish

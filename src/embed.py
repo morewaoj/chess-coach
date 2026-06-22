@@ -1,7 +1,11 @@
 import os
 from pathlib import Path
 from fastembed import TextEmbedding
+
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+
 import chromadb
+from chromadb.config import Settings
 
 CHROMA_DIR = "data/chroma_store"
 COLLECTION_NAME = "chess_coach"
@@ -14,7 +18,10 @@ def get_chroma_client() -> chromadb.PersistentClient:
     Data saved to disk so we only embed once.
     """
     Path(CHROMA_DIR).mkdir(parents=True, exist_ok=True)
-    client = chromadb.PersistentClient(path=CHROMA_DIR)
+    client = chromadb.PersistentClient(
+        path=CHROMA_DIR,
+        settings=Settings(anonymized_telemetry=False)
+    )
     return client
 
 
