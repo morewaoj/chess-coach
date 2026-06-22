@@ -577,12 +577,22 @@ https://chess-coach-api.onrender.com
 
 The frontend is static and uses:
 
-- `index.html`
-- `package.json`
-- `scripts/write-config.js`
-- `vercel.json`
+- `frontend/index.html`
+- `frontend/package.json`
+- `frontend/scripts/write-config.js`
+- `frontend/vercel.json`
 
-In Vercel project settings, add:
+In Vercel project settings, set:
+
+```txt
+Root Directory: frontend
+Framework Preset: Other
+Build Command: npm run build
+Output Directory: .
+Install Command: npm install
+```
+
+Then add this environment variable:
 
 ```bash
 CHESS_COACH_API_BASE=https://your-render-backend-url.onrender.com
@@ -607,6 +617,8 @@ http://localhost:8000
 - Do not deploy the backend to Vercel for the portfolio version.
   The backend uses Stockfish, ChromaDB, and in-memory game state,
   which fit better on a persistent Docker web service.
+- Setting the Vercel root directory to `frontend` prevents Vercel
+  from detecting the FastAPI backend files.
 - The included `.vercelignore` keeps backend files out of the
   frontend deployment.
 - The included `.dockerignore` keeps local-only files out of the
