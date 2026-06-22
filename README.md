@@ -615,8 +615,8 @@ http://localhost:8000
 ### Deployment Notes
 
 - Do not deploy the backend to Vercel for the portfolio version.
-  The backend uses Stockfish, ChromaDB, and in-memory game state,
-  which fit better on a persistent Docker web service.
+  The backend uses Stockfish and in-memory game state, which fit
+  better on a persistent Docker web service.
 - The Docker deployment uses `requirements-prod.txt` and a
   lightweight text retriever to avoid loading ChromaDB/ONNX
   embedding models on small-memory hosts.
@@ -629,6 +629,195 @@ http://localhost:8000
 - Current game state is in memory. Restarting the backend resets
   the game. For multi-user production, add Redis or database-backed
   sessions.
+
+---
+
+## Deployment Troubleshooting Log
+
+This section records deployment issues encountered during the
+project and the fix that worked. Add new issues here whenever
+deployment or runtime behavior breaks.
+
+### Issue: Render Backend Exceeded Memory Limit
+
+**Symptoms**
+
+- Render sent an alert:
+  `Web Service chess-coach-api exceeded its memory limit`.
+- The backend restarted automatically.
+- The frontend appeared to fail because it could not reliably
+  reach the backend during restarts.
+- Possible frontend symptoms:
+  - `Failed to fetch`
+  - `Backend unavailable`
+  - `502` or `503`
+  - temporary CORS-looking errors caused by the backend being down
+
+**Root Cause**
+
+The original backend loaded a heavy RAG stack at runtime:
+
+```txt
+fastembed + ChromaDB + ONNX runtime + vector store
+```
+
+That was too much memory for a small/free Render instance,
+especially alongside:
+
+```txt
+FastAPI + Stockfish subprocess + Groq client
+```
+
+The corpus only has 8 small chess documents, so a vector database
+was unnecessary for the hosted portfolio version.
+
+**Fix That Worked**
+
+- Replaced runtime Chroma/fastembed retrieval with lightweight
+  pure-Python text retrieval in `src/retrieve.py`.
+- Added `requirements-prod.txt` so Docker installs only production
+  backend dependencies.
+- Updated `Dockerfile` to use `requirements-prod.txt`.
+- Removed `RUN python src/embed.py` from Docker because the hosted
+  app no longer builds a Chroma vector store.
+- Kept the local embedding/Chroma files in the repo for learning
+  and experimentation, but production no longer depends on them.
+
+**Verification**
+
+```bash
+python -m unittest discover -s tests -v
+python src/retrieve.py
+```
+
+Expected:
+
+- Tests pass.
+- Sicilian queries return `openings_sicilian.txt`.
+- Fork queries return `tactics_fundamentals.txt`.
+- Opposition queries return `endgames_king_pawn.txt`.
+
+After pushing the fix, redeploy Render with **Manual Sync** and
+watch logs/metrics for memory restarts.
+
+### Issue: Vercel Tried To Deploy FastAPI Backend
+
+**Symptoms**
+
+Vercel failed with:
+
+```txt
+No FastAPI entrypoint found.
+Set "tool.vercel.entrypoint" in pyproject.toml...
+```
+
+**Root Cause**
+
+Vercel detected Python/FastAPI files in the repository root and
+tried to deploy the backend. In this architecture, Vercel should
+only deploy the static frontend. The backend is already deployed
+on Render.
+
+**Fix That Worked**
+
+- Added a dedicated `frontend/` directory containing only:
+  - `index.html`
+  - `package.json`
+  - `vercel.json`
+  - `scripts/write-config.js`
+  - `config.example.js`
+- Set Vercel **Root Directory** to:
+
+```txt
+frontend
+```
+
+- Set Vercel build settings:
+
+```txt
+Framework Preset: Other
+Build Command: npm run build
+Output Directory: .
+Install Command: npm install
+```
+
+- Added Vercel environment variable:
+
+```txt
+CHESS_COACH_API_BASE=https://your-render-backend-url.onrender.com
+```
+
+**Important**
+
+Do not use `VITE_API_URL` for this app. The frontend expects:
+
+```txt
+CHESS_COACH_API_BASE
+```
+
+### Issue: Groq Rate Limit
+
+**Symptoms**
+
+The coaching response includes a technical detail like:
+
+```txt
+Error code: 429
+rate_limit_exceeded
+tokens per day
+```
+
+**Root Cause**
+
+Groq daily token quota was reached. The backend is still running;
+the LLM provider temporarily refused the request.
+
+**Fixes That Worked**
+
+- Added `/game/best-move` so UI highlighting uses Stockfish only
+  and does not call Groq.
+- Reduced default LLM output:
+
+```txt
+GROQ_MAX_TOKENS=650
+RAG_TOP_K=3
+RAG_CHUNK_CHARS=450
+```
+
+- Shortened the default frontend coaching prompt.
+- Added a backend fallback so if Groq fails, the API still returns
+  a Stockfish-based response instead of making the app look dead.
+
+### Issue: Browser And Backend Board State Out Of Sync
+
+**Symptoms**
+
+A legal-looking move such as `e2e3` returned an error.
+
+**Root Cause**
+
+The backend was already at a later game state, for example after
+`1.e4`, so it was Black's turn. The move was valid notation but
+illegal in the current backend position.
+
+**Fix That Worked**
+
+- Reset backend state with:
+
+```bash
+curl -H "Content-Type: application/json" \
+  -d '{"confirm":true}' \
+  https://your-render-backend-url.onrender.com/game/reset
+```
+
+- Improved `src/board.py` so UCI moves that parse but are illegal
+  now return a clearer error:
+
+```txt
+Illegal move for current position...
+It is Black's turn...
+Current move history...
+```
 
 ---
 
